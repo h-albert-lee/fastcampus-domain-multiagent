@@ -228,8 +228,30 @@ def render_sidebar():
     except:
         st.sidebar.markdown('<div class="warning-card">🧠 지식베이스: 초기화 중</div>', unsafe_allow_html=True)
     
-    # 보안 시스템 상태
-    st.sidebar.markdown('<div class="success-card">🛡️ 보안 시스템: 활성</div>', unsafe_allow_html=True)
+    # 보안 시스템 상태 (고급 정보 포함)
+    try:
+        from core.guardrails import security_guardrails
+        security_report = security_guardrails.get_security_report()
+        
+        if security_report["security_level"] == "최고":
+            st.sidebar.markdown('<div class="success-card">🛡️ 보안 시스템: 최고 (AI 모더레이션 활성)</div>', unsafe_allow_html=True)
+        elif security_report["security_level"] == "높음":
+            st.sidebar.markdown('<div class="warning-card">🛡️ 보안 시스템: 높음 (키워드 필터링)</div>', unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown('<div class="success-card">🛡️ 보안 시스템: 활성</div>', unsafe_allow_html=True)
+            
+        # 보안 계층 정보 표시
+        if st.sidebar.expander("🔍 보안 상세 정보"):
+            st.sidebar.write(f"**보안 점수**: {security_report['security_score']}/100")
+            st.sidebar.write(f"**활성 계층**: {', '.join(security_report['active_layers'])}")
+            
+            if security_report["system_info"]["moderation_enabled"]:
+                st.sidebar.success("✅ AI 모더레이션 활성")
+            else:
+                st.sidebar.warning("⚠️ AI 모더레이션 비활성")
+                
+    except Exception as e:
+        st.sidebar.markdown('<div class="error-card">🛡️ 보안 시스템: 오류</div>', unsafe_allow_html=True)
 
 def render_main_interface():
     """
@@ -444,27 +466,77 @@ def render_admin_dashboard():
             st.plotly_chart(fig, use_container_width=True)
     
     with tab2:
-        # 보안 현황
+        # 고급 보안 현황
         security_report = security_guardrails.get_security_report()
         
+        # 보안 점수 표시
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                label="보안 점수",
+                value=f"{security_report['security_score']}/100",
+                delta=f"{security_report['security_level']} 등급"
+            )
+        
+        with col2:
+            st.metric(
+                label="활성 보안 계층",
+                value=len(security_report['active_layers']),
+                delta=", ".join(security_report['active_layers'])
+            )
+        
+        with col3:
+            moderation_status = "활성" if security_report["system_info"]["moderation_enabled"] else "비활성"
+            st.metric(
+                label="AI 모더레이션",
+                value=moderation_status,
+                delta="OpenAI API" if security_report["system_info"]["moderation_enabled"] else "API 키 필요"
+            )
+        
+        st.divider()
+        
+        # 보안 계층별 상세 정보
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**보안 시스템 상태**")
-            st.info(f"상태: {security_report['guardrail_status']}")
-            st.info(f"보안 레벨: {security_report['security_level']}")
-            st.info(f"마지막 업데이트: {security_report['last_updated']}")
+            st.markdown("**🔍 키워드 필터링**")
+            keyword_info = security_report["security_layers"]["keyword_filtering"]
+            st.info(f"상태: {keyword_info['status']}")
+            st.write(f"• 차단 키워드: {keyword_info['blacklist_size']}개")
+            st.write(f"• 패턴 규칙: {keyword_info['pattern_rules']}개")
+            st.write(f"• 규제 준수 규칙: {keyword_info['compliance_rules']}개")
         
         with col2:
-            st.markdown("**보안 규칙 현황**")
-            st.metric("입력 차단 키워드", security_report["input_blacklist_size"])
-            st.metric("출력 필터 규칙", security_report["output_filters_size"])
-            st.metric("패턴 매칭 규칙", security_report["pattern_rules"])
+            st.markdown("**🤖 AI 모더레이션**")
+            ai_info = security_report["security_layers"]["ai_moderation"]
+            
+            if ai_info['status'] == "활성":
+                st.success(f"상태: {ai_info['status']}")
+                st.write(f"• 제공업체: {ai_info['provider']}")
+                st.write(f"• 모니터링 카테고리: {ai_info['custom_thresholds']}개")
+                
+                # 모니터링 카테고리 표시
+                if ai_info['categories_monitored']:
+                    with st.expander("모니터링 카테고리"):
+                        for category in ai_info['categories_monitored']:
+                            st.write(f"• {category}")
+            else:
+                st.warning(f"상태: {ai_info['status']}")
+                st.write("• OpenAI API 키를 설정하여 활성화하세요")
+        
+        st.divider()
         
         # 보안 권장사항
-        st.markdown("**보안 권장사항**")
-        for rec in security_report["recommendations"]:
-            st.write(f"• {rec}")
+        st.markdown("**🛡️ 보안 강화 권장사항**")
+        for i, rec in enumerate(security_report["recommendations"], 1):
+            st.write(f"{i}. {rec}")
+        
+        # 시스템 정보
+        with st.expander("🔧 시스템 정보"):
+            st.write(f"• OpenAI 라이브러리: {'사용 가능' if security_report['system_info']['openai_available'] else '설치 필요'}")
+            st.write(f"• 총 보안 규칙: {security_report['system_info']['total_rules']}개")
+            st.write(f"• 마지막 업데이트: {security_report['last_updated']}")
     
     with tab3:
         # 상세 감사 로그
