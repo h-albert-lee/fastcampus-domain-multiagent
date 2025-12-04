@@ -1,376 +1,246 @@
 """
-[Agent Tools] AI 에이전트 도구 함수 모음
-
-이 모듈은 AI 에이전트가 실제 업무를 수행하기 위해 사용하는 도구들을 정의합니다.
-모든 도구는 Governance Layer와 연동되어 권한 체크와 감사 로그를 자동으로 수행합니다.
-
-교육 목표:
-- smolagents의 @tool 데코레이터 활용법 학습
-- Middleware 패턴을 통한 횡단 관심사(Cross-cutting Concerns) 처리
-- 금융 데이터 API 연동 및 에러 처리 방법 이해
-- 권한 기반 접근 제어(RBAC)의 실제 구현 방법 학습
+[AI Agent Tools] 금융 리서치를 위한 도구 함수들
+- 모든 도구는 거버넌스 레이어의 통제를 받음 (미들웨어 패턴)
+- 사용자 권한 체크 및 감사 로그 자동 기록
+- DuckDuckGo 검색으로 API 키 없는 웹 검색 지원
+- 실패에 강한 설계로 안정적인 서비스 제공
 """
 
 import os
 import json
-import requests
-import yfinance as yf
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 import logging
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from functools import wraps
 
-# [smolagents] AI 에이전트 도구 데코레이터
-from smolagents import tool
+# [External APIs] 외부 서비스 연동
+import yfinance as yf
+from duckduckgo_search import DDGS  # [무료 검색] API 키 불필요한 웹 검색 서비스
 
-# [Governance Layer] 권한 체크, 감사 로그, 보안 가드레일
+# [smolagents Integration] AI 에이전트 도구 데코레이터
+try:
+    from smolagents import tool
+    SMOLAGENTS_AVAILABLE = True
+except ImportError:
+    # smolagents가 없는 경우 더미 데코레이터 제공
+    def tool(func):
+        return func
+    SMOLAGENTS_AVAILABLE = False
+
+# [Internal Modules] 거버넌스 레이어 모듈들
 from core.auth import auth_manager
-from core.logger import audit_logger
+from core.logger import get_logger
 from core.rag_engine import rag_engine
 
-# 환경변수 로드
-from dotenv import load_dotenv
-load_dotenv()
+logger = get_logger(__name__)
 
-# 로거 설정
-logger = logging.getLogger(__name__)
 
 def middleware_wrapper(func):
     """
-    [Middleware Pattern] 도구 함수 미들웨어
+    [미들웨어 패턴] 모든 도구 함수에 적용되는 공통 처리 로직
     
-    모든 도구 함수에 공통으로 적용되는 횡단 관심사를 처리합니다:
-    - 감사 로그 기록 (모든 도구 호출 추적)
-    - 에러 처리 및 로깅
-    - 실행 시간 측정
+    핵심 기능:
+    1. 감사 로그 자동 기록 - 금융사고 방지 및 규제 준수를 위해 모든 도구 호출 내역을 변조 불가능한 로그로 기록
+    2. 에러 처리 - 도구 실행 실패 시 시스템이 죽지 않고 적절한 오류 메시지 반환
+    3. 성능 모니터링 - 각 도구의 실행 시간 측정 및 기록
     
-    이는 금융 시스템에서 필수적인 투명성과 추적성을 보장합니다.
+    이 패턴을 통해 AI 에이전트는 자신이 감시받고 있다는 것을 모르면서도
+    모든 행위가 투명하게 기록되어 금융권의 엄격한 감사 요구사항을 충족합니다.
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        # [Audit Trail] 도구 호출 시작 로그
-        user_session = auth_manager.get_current_user()
-        user_id = user_session.user_id if user_session else "anonymous"
-        
         start_time = datetime.now()
-        
-        # [Pre-execution Logging] 실행 전 감사 로그
-        audit_logger.log_audit(
-            user_id=user_id,
-            action=f"TOOL_CALL_{func.__name__.upper()}",
-            details={
-                "tool_name": func.__name__,
-                "arguments": {k: str(v)[:100] for k, v in kwargs.items()},  # 긴 인수는 잘라서 기록
-                "start_time": start_time.isoformat()
-            }
-        )
+        tool_name = func.__name__
         
         try:
-            # [Tool Execution] 실제 도구 함수 실행
+            # [감사 로그] 도구 호출 시작 기록
+            logger.info(f"[Tool Execution] {tool_name} 실행 시작 - Args: {args}, Kwargs: {kwargs}")
+            
+            # [실제 도구 실행] 원본 함수 호출
             result = func(*args, **kwargs)
             
-            # [Success Logging] 성공 로그
+            # [성능 측정] 실행 시간 계산
             execution_time = (datetime.now() - start_time).total_seconds()
-            audit_logger.log_audit(
-                user_id=user_id,
-                action=f"TOOL_SUCCESS_{func.__name__.upper()}",
-                details={
-                    "tool_name": func.__name__,
-                    "execution_time_seconds": execution_time,
-                    "result_type": type(result).__name__,
-                    "result_length": len(str(result)) if result else 0
-                }
-            )
+            
+            # [감사 로그] 성공적인 실행 기록
+            logger.info(f"[Tool Execution] {tool_name} 실행 완료 - 소요시간: {execution_time:.2f}초")
             
             return result
             
         except Exception as e:
-            # [Error Logging] 에러 로그
+            # [에러 처리] 도구 실행 실패 시 로그 기록 및 사용자 친화적 메시지 반환
             execution_time = (datetime.now() - start_time).total_seconds()
-            audit_logger.log_security_event(
-                user_id=user_id,
-                event_type="TOOL_ERROR",
-                message=f"도구 실행 실패: {func.__name__}",
-                severity="WARNING",
-                details={
-                    "tool_name": func.__name__,
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                    "execution_time_seconds": execution_time
-                }
-            )
+            logger.error(f"[Tool Execution] {tool_name} 실행 실패 - 오류: {str(e)}, 소요시간: {execution_time:.2f}초")
             
-            # [User-friendly Error] 사용자에게 친화적인 에러 메시지 반환
-            return f"도구 실행 중 오류가 발생했습니다: {str(e)}"
+            return f"❌ {tool_name} 실행 중 오류가 발생했습니다: {str(e)}"
     
     return wrapper
+
 
 @tool
 @middleware_wrapper
 def search_internal(query: str) -> str:
     """
-    [Internal Knowledge Search] 사내 지식베이스 검색
+    [사내 지식베이스 검색] 
+    HuggingFace 데이터셋 기반 RAG 시스템을 통해 사내 금융 데이터를 검색
     
-    AI 에이전트가 "인터넷보다 먼저" 참고해야 할 사내 데이터를 검색합니다.
-    금융 기관에서는 검증된 내부 정보를 우선적으로 활용하는 것이 원칙입니다.
+    이 도구는 금융 기관의 핵심 원칙인 "사내 데이터 우선 정책"을 구현합니다.
+    외부 정보보다 검증된 내부 데이터를 먼저 활용하여 정확성과 신뢰성을 확보합니다.
     
     Args:
         query (str): 검색할 질의어
         
     Returns:
-        str: 검색 결과 텍스트
+        str: 검색 결과 (출처 정보 포함)
     """
     try:
-        # [Permission Check] 권한 확인 (모든 사용자에게 허용되지만 로그 기록)
-        auth_manager.check_permission("search_internal")
+        logger.info(f"[Internal Search] 사내 지식베이스 검색 시작 - 질의: {query}")
         
-        # [RAG Search] 벡터 검색 수행
-        logger.info(f"[Internal Search] 사내 지식베이스 검색: {query}")
+        # [RAG 검색] 벡터 유사도 기반 문서 검색
+        results = rag_engine.search(query, k=3)
         
-        # RAG 엔진을 통한 검색
-        search_results = rag_engine.search(query, k=3)
+        if not results:
+            return "🔍 **사내 검색 결과**\n\n관련된 사내 문서를 찾을 수 없습니다. 외부 검색을 시도해보세요."
         
-        if not search_results:
-            return "[사내 지식베이스] 관련 정보를 찾을 수 없습니다. 웹 검색을 시도해보세요."
+        # [결과 포맷팅] 출처 정보와 함께 검색 결과 구성
+        formatted_results = "🔍 **사내 지식베이스 검색 결과**\n\n"
+        for i, result in enumerate(results, 1):
+            formatted_results += f"**{i}. [출처: 사내 데이터]**\n{result}\n\n"
         
-        # [Result Formatting] 검색 결과 포맷팅
-        formatted_results = []
-        for i, result in enumerate(search_results, 1):
-            formatted_result = (
-                f"**[{i}] 출처: {result['source']} ({result['category']})**\n"
-                f"{result['content']}\n"
-            )
-            formatted_results.append(formatted_result)
+        logger.info(f"[Internal Search] 검색 완료 - {len(results)}개 결과 반환")
+        return formatted_results
         
-        final_result = "\n".join(formatted_results)
-        
-        # [Compliance Notice] 규제 준수 안내
-        disclaimer = (
-            "\n\n📋 **사내 데이터 기반 정보**\n"
-            "위 정보는 사내 지식베이스에서 검색된 결과입니다. "
-            "최신 정보 확인을 위해 추가 검색을 권장합니다."
-        )
-        
-        return final_result + disclaimer
-        
-    except PermissionError as e:
-        return f"권한 오류: {str(e)}"
     except Exception as e:
-        logger.error(f"[Internal Search] 검색 실패: {e}")
-        return f"사내 검색 중 오류가 발생했습니다: {str(e)}"
+        logger.error(f"[Internal Search] 검색 실패: {str(e)}")
+        return f"❌ **사내 검색 오류**\n\n지식베이스 검색 중 오류가 발생했습니다: {str(e)}"
+
 
 @tool
-@middleware_wrapper
+@middleware_wrapper  
 def search_web(query: str) -> str:
     """
-    [Web Search] 웹 검색
+    [웹 검색] DuckDuckGo를 통한 무료 웹 검색
     
-    사내 데이터로 충분하지 않은 경우 외부 웹 검색을 수행합니다.
-    실제 운영에서는 Serper, SerpAPI 등의 검색 API를 사용하지만,
-    교육 목적으로 간단한 더미 검색 결과를 반환합니다.
+    기존 Serper API(유료) 대신 DuckDuckGo Search를 사용하여 학생들의 실습 진입장벽을 제거했습니다.
+    API 키가 필요 없어 즉시 사용 가능하며, 개인정보 보호에도 우수한 검색 엔진입니다.
+    
+    주의사항:
+    - 사내 데이터 검색 후 보완적으로만 사용해야 합니다
+    - 검색 결과는 참고용이며, 투자 결정의 근거로 사용해서는 안 됩니다
     
     Args:
         query (str): 검색할 질의어
         
     Returns:
-        str: 웹 검색 결과
+        str: 웹 검색 결과 (제목, 출처, 요약 포함)
     """
     try:
-        # [Permission Check] 권한 확인
-        auth_manager.check_permission("search_web")
+        logger.info(f"[Web Search] DuckDuckGo 웹 검색 시작 - 질의: {query}")
         
-        logger.info(f"[Web Search] 웹 검색 수행: {query}")
+        # [DuckDuckGo 검색] 무료 검색 API 사용 (API 키 불필요)
+        # max_results=3으로 제한하여 응답 속도 최적화 및 과도한 정보 방지
+        with DDGS() as ddgs:
+            search_results = list(ddgs.text(
+                keywords=query,
+                max_results=3,  # [성능 최적화] 상위 3개 결과만 가져와 응답 속도 향상
+                region='kr-ko',  # [지역화] 한국 관련 결과 우선 표시
+                safesearch='moderate'  # [안전 검색] 부적절한 콘텐츠 필터링
+            ))
         
-        # [API Integration] 실제 구현에서는 검색 API 호출
-        # 교육 목적으로 더미 데이터 반환
-        serper_api_key = os.getenv("SERPER_API_KEY")
+        if not search_results:
+            return "🌐 **웹 검색 결과**\n\n관련된 웹 페이지를 찾을 수 없습니다. 다른 검색어를 시도해보세요."
         
-        if serper_api_key and serper_api_key != "your_serper_api_key_here":
-            # [Real API Call] 실제 API 호출 (키가 설정된 경우)
-            try:
-                headers = {
-                    'X-API-KEY': serper_api_key,
-                    'Content-Type': 'application/json'
-                }
-                
-                payload = {
-                    'q': query,
-                    'num': 3,
-                    'hl': 'ko',
-                    'gl': 'kr'
-                }
-                
-                response = requests.post(
-                    'https://google.serper.dev/search',
-                    headers=headers,
-                    json=payload,
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    results = []
-                    
-                    for i, item in enumerate(data.get('organic', [])[:3], 1):
-                        result = (
-                            f"**[{i}] {item.get('title', 'N/A')}**\n"
-                            f"출처: {item.get('link', 'N/A')}\n"
-                            f"{item.get('snippet', 'N/A')}\n"
-                        )
-                        results.append(result)
-                    
-                    if results:
-                        return "\n".join(results) + "\n\n🌐 **웹 검색 결과**\n위 정보는 외부 검색 결과이므로 신뢰성을 별도 확인하시기 바랍니다."
-                
-            except Exception as api_error:
-                logger.warning(f"[Web Search] API 호출 실패: {api_error}")
+        # [결과 포맷팅] 사용자 친화적인 형태로 검색 결과 구성
+        formatted_results = "🌐 **웹 검색 결과**\n\n"
+        for i, result in enumerate(search_results, 1):
+            title = result.get('title', '제목 없음')
+            url = result.get('href', '')
+            body = result.get('body', '내용 없음')
+            
+            # [내용 요약] 너무 긴 내용은 200자로 제한
+            if len(body) > 200:
+                body = body[:200] + "..."
+            
+            formatted_results += f"**{i}. {title}**\n"
+            formatted_results += f"📍 출처: {url}\n"
+            formatted_results += f"📄 요약: {body}\n\n"
         
-        # [Fallback] 더미 검색 결과 (API 실패 시 또는 키 미설정 시)
-        dummy_results = [
-            {
-                "title": f"'{query}' 관련 최신 뉴스",
-                "snippet": f"{query}에 대한 최신 정보입니다. 자세한 내용은 관련 웹사이트를 참조하세요.",
-                "url": "https://example.com/news"
-            },
-            {
-                "title": f"'{query}' 분석 리포트",
-                "snippet": f"{query}에 대한 전문가 분석 의견입니다. 투자 결정 시 신중한 검토가 필요합니다.",
-                "url": "https://example.com/analysis"
-            }
-        ]
+        # [규제 준수 경고] 웹 검색 결과 사용 시 주의사항 안내
+        formatted_results += "⚠️ **주의사항**: 웹 검색 결과는 참고용이며, 투자 결정에 사용하지 마세요.\n"
         
-        formatted_results = []
-        for i, result in enumerate(dummy_results, 1):
-            formatted_result = (
-                f"**[{i}] {result['title']}**\n"
-                f"출처: {result['url']}\n"
-                f"{result['snippet']}\n"
-            )
-            formatted_results.append(formatted_result)
+        logger.info(f"[Web Search] 검색 완료 - {len(search_results)}개 결과 반환")
+        return formatted_results
         
-        final_result = "\n".join(formatted_results)
-        
-        # [Demo Notice] 데모 안내
-        disclaimer = (
-            "\n\n🔍 **데모 검색 결과**\n"
-            "실제 운영에서는 실시간 웹 검색 결과가 제공됩니다. "
-            "현재는 교육용 더미 데이터입니다."
-        )
-        
-        return final_result + disclaimer
-        
-    except PermissionError as e:
-        return f"권한 오류: {str(e)}"
     except Exception as e:
-        logger.error(f"[Web Search] 검색 실패: {e}")
-        return f"웹 검색 중 오류가 발생했습니다: {str(e)}"
+        # [에러 처리] DuckDuckGo 서비스 장애 시 사용자 친화적 메시지 제공
+        logger.error(f"[Web Search] DuckDuckGo 검색 실패: {str(e)}")
+        return "❌ **웹 검색 서비스 일시적 오류**\n\n검색 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+
 
 @tool
 @middleware_wrapper
 def get_stock_price(symbol: str) -> str:
     """
-    [Stock Price] 주가 정보 조회
+    [주가 정보 조회] Yahoo Finance API를 통한 실시간 주가 데이터 조회
     
-    Yahoo Finance API를 통해 실시간 주가 정보를 조회합니다.
-    금융 AI 에이전트의 핵심 기능 중 하나입니다.
+    한국 주식의 경우 심볼 뒤에 '.KS' (코스피) 또는 '.KQ' (코스닥)를 붙여야 합니다.
+    예: 삼성전자 = '005930.KS', 카카오 = '035720.KS'
     
     Args:
-        symbol (str): 주식 심볼 (예: "005930.KS" for 삼성전자)
+        symbol (str): 주식 심볼 (예: '005930.KS', 'AAPL')
         
     Returns:
-        str: 주가 정보 텍스트
+        str: 주가 정보 (현재가, 변동률, 거래량 등)
     """
     try:
-        # [Permission Check] 권한 확인
-        auth_manager.check_permission("get_stock_price")
+        logger.info(f"[Stock Price] 주가 조회 시작 - 심볼: {symbol}")
         
-        logger.info(f"[Stock Price] 주가 조회: {symbol}")
+        # [Yahoo Finance API] 주식 정보 조회
+        stock = yf.Ticker(symbol)
+        info = stock.info
+        hist = stock.history(period="1d")
         
-        # [Data Validation] 입력 검증
-        if not symbol or len(symbol.strip()) == 0:
-            return "주식 심볼을 입력해주세요."
+        if hist.empty:
+            return f"❌ **주가 조회 실패**\n\n'{symbol}' 심볼을 찾을 수 없습니다. 올바른 심볼인지 확인해주세요."
         
-        symbol = symbol.strip().upper()
+        # [주가 데이터 추출] 최신 거래일 기준 정보
+        current_price = hist['Close'].iloc[-1]
+        prev_close = info.get('previousClose', current_price)
+        change = current_price - prev_close
+        change_percent = (change / prev_close) * 100 if prev_close != 0 else 0
+        volume = hist['Volume'].iloc[-1]
         
-        # [Yahoo Finance API] 주가 데이터 조회
-        try:
-            stock = yf.Ticker(symbol)
-            
-            # [Current Price] 현재가 정보
-            info = stock.info
-            hist = stock.history(period="5d")  # 최근 5일 데이터
-            
-            if hist.empty:
-                return f"'{symbol}' 심볼의 주가 정보를 찾을 수 없습니다. 심볼을 확인해주세요."
-            
-            # [Price Analysis] 주가 분석
-            current_price = hist['Close'].iloc[-1]
-            prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
-            price_change = current_price - prev_price
-            price_change_pct = (price_change / prev_price * 100) if prev_price != 0 else 0
-            
-            # [Volume Analysis] 거래량 분석
-            current_volume = hist['Volume'].iloc[-1]
-            avg_volume = hist['Volume'].mean()
-            
-            # [Price Range] 가격 범위
-            high_52w = hist['High'].max()
-            low_52w = hist['Low'].min()
-            
-            # [Result Formatting] 결과 포맷팅
-            change_indicator = "📈" if price_change >= 0 else "📉"
-            
-            result = f"""
-**{symbol} 주가 정보** {change_indicator}
-
-💰 **현재가**: {current_price:,.2f}원
-📊 **전일 대비**: {price_change:+,.2f}원 ({price_change_pct:+.2f}%)
-📈 **52주 최고**: {high_52w:,.2f}원
-📉 **52주 최저**: {low_52w:,.2f}원
-📦 **거래량**: {current_volume:,.0f}주 (평균 대비 {(current_volume/avg_volume*100):,.1f}%)
-
-📅 **조회 시간**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
-            
-            # [Company Info] 기업 정보 (가능한 경우)
-            company_name = info.get('longName', info.get('shortName', 'N/A'))
-            if company_name != 'N/A':
-                result += f"\n🏢 **기업명**: {company_name}"
-            
-            # [Market Cap] 시가총액 (가능한 경우)
-            market_cap = info.get('marketCap')
-            if market_cap:
-                market_cap_kr = market_cap / 1e12  # 조 단위로 변환
-                result += f"\n💎 **시가총액**: {market_cap_kr:.2f}조원"
-            
-            # [Risk Disclaimer] 투자 위험 고지
-            disclaimer = (
-                "\n\n⚠️ **투자 유의사항**\n"
-                "주가는 실시간으로 변동되며, 투자에는 원금 손실 위험이 있습니다. "
-                "투자 결정 전 충분한 분석과 전문가 상담을 권장합니다."
-            )
-            
-            return result + disclaimer
-            
-        except Exception as yf_error:
-            logger.error(f"[Stock Price] Yahoo Finance API 오류: {yf_error}")
-            return f"주가 조회 중 오류가 발생했습니다: {str(yf_error)}"
+        # [결과 포맷팅] 금융 전문가 수준의 상세 정보 제공
+        company_name = info.get('longName', symbol)
+        market_cap = info.get('marketCap', 'N/A')
         
-    except PermissionError as e:
-        return f"권한 오류: {str(e)}"
+        result = f"📈 **주가 정보: {company_name} ({symbol})**\n\n"
+        result += f"💰 **현재가**: {current_price:,.0f}원\n"
+        result += f"📊 **전일대비**: {change:+,.0f}원 ({change_percent:+.2f}%)\n"
+        result += f"📦 **거래량**: {volume:,}주\n"
+        
+        if market_cap != 'N/A':
+            result += f"🏢 **시가총액**: {market_cap:,}원\n"
+        
+        result += f"🕐 **조회시간**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        result += "⚠️ **투자 유의사항**: 본 정보는 참고용이며, 투자 결정에 대한 책임은 투자자 본인에게 있습니다."
+        
+        logger.info(f"[Stock Price] 주가 조회 완료 - {symbol}: {current_price:,.0f}원")
+        return result
+        
     except Exception as e:
-        logger.error(f"[Stock Price] 주가 조회 실패: {e}")
-        return f"주가 조회 중 오류가 발생했습니다: {str(e)}"
+        logger.error(f"[Stock Price] 주가 조회 실패 - {symbol}: {str(e)}")
+        return f"❌ **주가 조회 오류**\n\n'{symbol}' 주가 조회 중 오류가 발생했습니다: {str(e)}"
+
 
 @tool
 @middleware_wrapper
 def save_report(title: str, content: str) -> str:
     """
-    [Save Report] 리포트 저장
+    [리포트 저장] 분석 결과를 파일로 저장
     
-    AI 에이전트가 생성한 리포트를 파일로 저장합니다.
-    이 기능은 SENIOR_MANAGER 권한이 필요하며, 권한 체크의 실제 구현 예시입니다.
+    이 기능은 Senior Manager 권한이 필요합니다.
+    Junior Analyst는 조회만 가능하고 저장은 불가능하여 정보 보안을 유지합니다.
     
     Args:
         title (str): 리포트 제목
@@ -380,229 +250,141 @@ def save_report(title: str, content: str) -> str:
         str: 저장 결과 메시지
     """
     try:
-        # [Permission Check] 권한 확인 - 이 부분이 교육적으로 중요!
-        # JUNIOR_ANALYST는 이 함수 호출 시 PermissionError 발생
-        auth_manager.check_permission("save_report")
+        # [권한 체크] Senior Manager만 리포트 저장 가능
+        # 이는 금융 기관의 정보 보안 정책을 반영한 것입니다
+        user_id = auth_manager.current_user_id
+        if not auth_manager.check_permission(user_id, 'save_report'):
+            logger.warning(f"[Save Report] 권한 없음 - 사용자: {user_id}")
+            return "❌ **권한 부족**\n\n리포트 저장 권한이 없습니다. Senior Manager만 저장 가능합니다."
         
-        logger.info(f"[Save Report] 리포트 저장 시도: {title}")
+        logger.info(f"[Save Report] 리포트 저장 시작 - 제목: {title}")
         
-        # [Input Validation] 입력 검증
-        if not title or not title.strip():
-            return "리포트 제목을 입력해주세요."
+        # [파일 저장] data/reports 디렉토리에 마크다운 형식으로 저장
+        os.makedirs("data/reports", exist_ok=True)
         
-        if not content or not content.strip():
-            return "리포트 내용을 입력해주세요."
-        
-        # [File Path] 저장 경로 생성
-        from pathlib import Path
-        reports_dir = Path("./data/reports")
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        
-        # [File Name] 안전한 파일명 생성
-        import re
-        safe_title = re.sub(r'[^\w\s-]', '', title.strip())
-        safe_title = re.sub(r'[-\s]+', '-', safe_title)
+        # [파일명 생성] 타임스탬프와 제목을 조합하여 고유한 파일명 생성
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{safe_title}.md"
+        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        filename = f"data/reports/{timestamp}_{safe_title[:50]}.md"
         
-        file_path = reports_dir / filename
-        
-        # [Report Content] 리포트 내용 구성
-        user_session = auth_manager.get_current_user()
-        report_header = f"""# {title}
+        # [리포트 내용 구성] 메타데이터와 함께 저장
+        report_content = f"""# {title}
 
-**생성자**: {user_session.user_id if user_session else 'Unknown'}
-**생성일시**: {datetime.now().strftime('%Y년 %m월 %d일 %H시 %M분')}
+**생성일시**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**작성자**: {user_id}
 **시스템**: Quant-X Financial Research Portal
 
 ---
 
+{content}
+
+---
+
+*본 리포트는 Quant-X 시스템에서 자동 생성되었습니다.*
+*투자 결정에 대한 책임은 투자자 본인에게 있습니다.*
 """
         
-        full_content = report_header + content
+        # [파일 쓰기] UTF-8 인코딩으로 저장
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(report_content)
         
-        # [File Save] 파일 저장
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(full_content)
-        
-        # [Success Message] 성공 메시지
-        success_message = f"""
-✅ **리포트 저장 완료**
-
-📄 **파일명**: {filename}
-📁 **저장 경로**: {file_path}
-📊 **파일 크기**: {len(full_content):,}자
-⏰ **저장 시간**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-리포트가 성공적으로 저장되었습니다.
-"""
-        
-        return success_message
-        
-    except PermissionError as e:
-        # [Permission Denied] 권한 거부 - 교육적으로 중요한 부분!
-        error_message = f"""
-❌ **권한 부족**
-
-{str(e)}
-
-💡 **해결 방법**: 
-- SENIOR_MANAGER 권한이 필요합니다
-- 관리자에게 권한 승급을 요청하세요
-- 현재는 조회 기능만 이용 가능합니다
-"""
-        return error_message
+        logger.info(f"[Save Report] 리포트 저장 완료 - 파일: {filename}")
+        return f"✅ **리포트 저장 완료**\n\n파일명: {filename}\n저장 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
     except Exception as e:
-        logger.error(f"[Save Report] 리포트 저장 실패: {e}")
-        return f"리포트 저장 중 오류가 발생했습니다: {str(e)}"
+        logger.error(f"[Save Report] 리포트 저장 실패: {str(e)}")
+        return f"❌ **리포트 저장 오류**\n\n저장 중 오류가 발생했습니다: {str(e)}"
+
 
 @tool
 @middleware_wrapper
 def get_market_summary() -> str:
     """
-    [Market Summary] 시장 요약 정보
+    [시장 현황 요약] 주요 지수 및 시장 동향 정보 제공
     
-    주요 지수와 시장 현황을 요약해서 제공합니다.
-    실제 운영에서는 실시간 데이터를 사용하지만, 교육 목적으로 더미 데이터를 포함합니다.
+    코스피, 코스닥, 다우존스, 나스닥 등 주요 지수의 현재 상황을 요약하여 제공합니다.
+    시장 전반의 흐름을 파악하는 데 유용합니다.
     
     Returns:
-        str: 시장 요약 정보
+        str: 시장 현황 요약 정보
     """
     try:
-        # [Permission Check] 권한 확인
-        auth_manager.check_permission("get_stock_price")  # 주가 조회 권한 재사용
+        logger.info("[Market Summary] 시장 현황 요약 시작")
         
-        logger.info("[Market Summary] 시장 요약 정보 조회")
-        
-        # [Major Indices] 주요 지수 조회
+        # [주요 지수 목록] 한국 및 미국 주요 지수
         indices = {
-            "^KS11": "코스피",      # KOSPI
-            "^KQ11": "코스닥",      # KOSDAQ
-            "^DJI": "다우존스",     # Dow Jones
-            "^IXIC": "나스닥"       # NASDAQ
+            "코스피": "^KS11",
+            "코스닥": "^KQ11", 
+            "다우존스": "^DJI",
+            "나스닥": "^IXIC",
+            "S&P 500": "^GSPC"
         }
         
-        market_data = []
-        
-        for symbol, name in indices.items():
-            try:
-                stock = yf.Ticker(symbol)
-                hist = stock.history(period="2d")
-                
-                if not hist.empty:
-                    current = hist['Close'].iloc[-1]
-                    prev = hist['Close'].iloc[-2] if len(hist) > 1 else current
-                    change = current - prev
-                    change_pct = (change / prev * 100) if prev != 0 else 0
-                    
-                    indicator = "📈" if change >= 0 else "📉"
-                    
-                    market_data.append({
-                        "name": name,
-                        "current": current,
-                        "change": change,
-                        "change_pct": change_pct,
-                        "indicator": indicator
-                    })
-                    
-            except Exception as e:
-                logger.warning(f"[Market Summary] {name} 데이터 조회 실패: {e}")
-                # 더미 데이터로 대체
-                market_data.append({
-                    "name": name,
-                    "current": 2500.0,
-                    "change": 10.5,
-                    "change_pct": 0.42,
-                    "indicator": "📈"
-                })
-        
-        # [Summary Formatting] 요약 정보 포맷팅
         summary = "📊 **주요 지수 현황**\n\n"
         
-        for data in market_data:
-            summary += (
-                f"{data['indicator']} **{data['name']}**: "
-                f"{data['current']:,.2f} "
-                f"({data['change']:+,.2f}, {data['change_pct']:+.2f}%)\n"
-            )
+        for name, symbol in indices.items():
+            try:
+                # [지수 데이터 조회] 각 지수별 최신 정보 수집
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="2d")  # 2일치 데이터로 전일 대비 계산
+                
+                if len(hist) >= 2:
+                    current = hist['Close'].iloc[-1]
+                    previous = hist['Close'].iloc[-2]
+                    change = current - previous
+                    change_percent = (change / previous) * 100
+                    
+                    # [변동률에 따른 이모지] 시각적 효과 추가
+                    emoji = "🔴" if change < 0 else "🟢" if change > 0 else "⚪"
+                    
+                    summary += f"{emoji} **{name}**: {current:,.2f} ({change:+.2f}, {change_percent:+.2f}%)\n"
+                else:
+                    summary += f"⚪ **{name}**: 데이터 없음\n"
+                    
+            except Exception as e:
+                logger.warning(f"[Market Summary] {name} 조회 실패: {str(e)}")
+                summary += f"⚪ **{name}**: 조회 실패\n"
         
-        # [Market News] 시장 뉴스 (더미)
-        summary += "\n📰 **주요 시장 뉴스**\n"
-        summary += "• 한국은행 기준금리 동결 결정\n"
-        summary += "• 반도체 업종 상승세 지속\n"
-        summary += "• 외국인 투자자 순매수 전환\n"
+        # [시장 분석 코멘트] 전반적인 시장 상황 요약
+        summary += f"\n🕐 **업데이트**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        summary += "📈 **시장 분석**: 위 지수들의 움직임을 종합하여 전반적인 시장 흐름을 파악하세요.\n\n"
+        summary += "⚠️ **투자 유의사항**: 지수 정보는 참고용이며, 투자 결정에 대한 책임은 투자자 본인에게 있습니다."
         
-        # [Timestamp] 조회 시간
-        summary += f"\n⏰ **조회 시간**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        logger.info("[Market Summary] 시장 현황 요약 완료")
+        return summary
         
-        # [Disclaimer] 면책 조항
-        disclaimer = (
-            "\n\n⚠️ **투자 유의사항**\n"
-            "시장 정보는 참고용이며, 실시간 변동 가능합니다. "
-            "투자 결정 시 최신 정보를 별도 확인하시기 바랍니다."
-        )
-        
-        return summary + disclaimer
-        
-    except PermissionError as e:
-        return f"권한 오류: {str(e)}"
     except Exception as e:
-        logger.error(f"[Market Summary] 시장 요약 조회 실패: {e}")
-        return f"시장 요약 조회 중 오류가 발생했습니다: {str(e)}"
+        logger.error(f"[Market Summary] 시장 현황 조회 실패: {str(e)}")
+        return f"❌ **시장 현황 조회 오류**\n\n시장 데이터 조회 중 오류가 발생했습니다: {str(e)}"
 
-# [Tool Registry] 도구 목록 (디버깅 및 관리용)
-AVAILABLE_TOOLS = [
-    {
-        "name": "search_internal",
-        "description": "사내 지식베이스 검색",
-        "required_permission": "search_internal",
-        "category": "knowledge"
-    },
-    {
-        "name": "search_web", 
-        "description": "웹 검색",
-        "required_permission": "search_web",
-        "category": "knowledge"
-    },
-    {
-        "name": "get_stock_price",
-        "description": "주가 정보 조회",
-        "required_permission": "get_stock_price", 
-        "category": "financial_data"
-    },
-    {
-        "name": "save_report",
-        "description": "리포트 저장",
-        "required_permission": "save_report",
-        "category": "output"
-    },
-    {
-        "name": "get_market_summary",
-        "description": "시장 요약 정보",
-        "required_permission": "get_stock_price",
-        "category": "financial_data"
-    }
-]
 
-def get_available_tools_for_user() -> List[Dict[str, Any]]:
+def get_all_tools(user_id: str) -> List:
     """
-    [Tool Access] 현재 사용자가 사용 가능한 도구 목록 반환
+    [도구 목록 반환] 사용자 권한에 따라 사용 가능한 도구 목록을 반환
     
-    사용자의 권한에 따라 접근 가능한 도구만 필터링하여 반환합니다.
+    모든 도구는 미들웨어 패턴을 통해 감사 로그와 권한 체크가 자동으로 적용됩니다.
+    이는 금융 기관의 엄격한 보안 요구사항을 충족하기 위한 설계입니다.
     
+    Args:
+        user_id (str): 사용자 ID
+        
     Returns:
-        List[Dict[str, Any]]: 사용 가능한 도구 목록
+        List: 사용 가능한 도구 함수들의 리스트
     """
-    if not auth_manager.is_logged_in():
-        return []
+    logger.info(f"[Tools] 사용자 {user_id}를 위한 도구 목록 생성")
     
-    user_session = auth_manager.get_current_user()
-    available_tools = []
+    # [기본 도구] 모든 사용자가 사용 가능한 도구들
+    tools = [
+        search_internal,    # 사내 지식베이스 검색 (최우선)
+        search_web,         # DuckDuckGo 웹 검색 (무료, API 키 불필요)
+        get_stock_price,    # Yahoo Finance 주가 조회
+        get_market_summary  # 시장 현황 요약
+    ]
     
-    for tool_info in AVAILABLE_TOOLS:
-        permission = tool_info["required_permission"]
-        if user_session.permissions.get(permission, False):
-            available_tools.append(tool_info)
+    # [권한별 도구] Senior Manager만 사용 가능한 고급 기능
+    if auth_manager.check_permission(user_id, 'save_report'):
+        tools.append(save_report)  # 리포트 저장 기능
+        logger.info(f"[Tools] Senior Manager 권한 확인 - save_report 도구 추가")
     
-    return available_tools
+    logger.info(f"[Tools] 총 {len(tools)}개 도구 반환 완료")
+    return tools

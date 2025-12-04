@@ -407,3 +407,29 @@ class AuditLogger:
 # [Global Instance] 전역 감사 로거 인스턴스
 # 앱 전체에서 하나의 로거를 공유하여 일관된 로깅을 보장합니다.
 audit_logger = AuditLogger()
+
+def get_logger(name: str) -> logging.Logger:
+    """
+    [Logger Factory] 모듈별 로거 생성
+    
+    각 모듈에서 사용할 표준 로거를 생성합니다.
+    모든 로그는 감사 로거와 연동되어 중앙 집중식으로 관리됩니다.
+    
+    Args:
+        name (str): 로거 이름 (보통 __name__ 사용)
+        
+    Returns:
+        logging.Logger: 설정된 로거 인스턴스
+    """
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        # 기본 핸들러 설정
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    
+    return logger

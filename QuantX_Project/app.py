@@ -24,8 +24,8 @@ from core.auth import auth_manager
 from core.logger import audit_logger
 from core.guardrails import security_guardrails
 from core.rag_engine import rag_engine
-from agents.core import quantx_agent
-from agents.tools import get_available_tools_for_user
+from agents.core import create_agent
+# from agents.tools import get_available_tools_for_user  # 현재 사용하지 않음
 
 # [Page Configuration] 페이지 설정
 st.set_page_config(
@@ -157,10 +157,12 @@ def render_sidebar():
             st.write(auth_manager.get_permission_summary())
         
         # 사용 가능한 도구
-        available_tools = get_available_tools_for_user()
         with st.sidebar.expander("🛠️ 사용 가능한 도구"):
-            for tool in available_tools:
-                st.write(f"✅ {tool['description']}")
+            st.write("✅ 사내 지식베이스 검색")
+            st.write("✅ 웹 검색 및 주가 조회")
+            st.write("✅ 시장 요약 정보 제공")
+            if user_info["role"] == "SENIOR_MANAGER":
+                st.write("✅ 리포트 생성 및 저장")
         
         # 로그아웃 버튼
         if st.sidebar.button("로그아웃"):
@@ -209,10 +211,14 @@ def render_sidebar():
     st.sidebar.title("⚡ 시스템 상태")
     
     # 에이전트 상태
-    agent_status = quantx_agent.get_agent_status()
-    if agent_status["agent_initialized"]:
-        st.sidebar.markdown('<div class="success-card">🤖 AI 에이전트: 정상</div>', unsafe_allow_html=True)
-    else:
+    try:
+        # 임시 에이전트 생성으로 상태 확인
+        test_agent = create_agent("system_check")
+        if test_agent.is_demo_mode:
+            st.sidebar.markdown('<div class="warning-card">🤖 AI 에이전트: 데모 모드</div>', unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown('<div class="success-card">🤖 AI 에이전트: 정상</div>', unsafe_allow_html=True)
+    except:
         st.sidebar.markdown('<div class="error-card">🤖 AI 에이전트: 오류</div>', unsafe_allow_html=True)
     
     # RAG 엔진 상태
@@ -342,58 +348,34 @@ def render_main_interface():
                 
                 # 실제 에이전트 실행
                 try:
-                    result = quantx_agent.process_request(user_request)
+                    # 사용자별 에이전트 생성
+                    user_agent = create_agent(user_info["user_id"])
+                    result = user_agent.process_request(user_request)
                     
-                    if result["success"]:
-                        status.update(label="✅ 리서치 완료!", state="complete", expanded=False)
-                        
-                        # 결과 표시
-                        st.markdown("### 📋 리서치 결과")
-                        st.markdown(result["response"])
-                        
-                        # 메타데이터 표시
-                        if "metadata" in result:
-                            with st.expander("📊 처리 정보"):
-                                metadata = result["metadata"]
-                                col1, col2, col3 = st.columns(3)
-                                
-                                with col1:
-                                    st.metric("처리 시간", f"{datetime.now().strftime('%H:%M:%S')}")
-                                
-                                with col2:
-                                    compliance_score = metadata.get("compliance_score", {})
-                                    score = compliance_score.get("score", 0)
-                                    st.metric("규제 준수 점수", f"{score}점")
-                                
-                                with col3:
-                                    filtered = "예" if metadata.get("output_filtered", False) else "아니오"
-                                    st.metric("출력 필터링", filtered)
-                        
-                        # 채팅 히스토리에 추가
-                        st.session_state.chat_history.append({
-                            "timestamp": datetime.now(),
-                            "request": user_request,
-                            "response": result["response"],
-                            "success": True
-                        })
-                        
-                    else:
-                        status.update(label="❌ 처리 실패", state="error", expanded=True)
-                        st.error(f"**오류**: {result['message']}")
-                        
-                        if "issues" in result:
-                            st.write("**감지된 문제:**")
-                            for issue in result["issues"]:
-                                st.write(f"- {issue}")
-                        
-                        # 실패한 요청도 히스토리에 추가
-                        st.session_state.chat_history.append({
-                            "timestamp": datetime.now(),
-                            "request": user_request,
-                            "response": result.get("response", "처리 실패"),
-                            "success": False,
-                            "error": result.get("message", "알 수 없는 오류")
-                        })
+                    status.update(label="✅ 리서치 완료!", state="complete", expanded=False)
+                    
+                    # 결과 표시
+                    st.markdown("### 📋 리서치 결과")
+                    st.markdown(result)
+                    
+                    # 처리 정보 표시
+                    with st.expander("📊 처리 정보"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("처리 시간", f"{datetime.now().strftime('%H:%M:%S')}")
+                        with col2:
+                            mode = "데모 모드" if user_agent.is_demo_mode else "AI 모드"
+                            st.metric("실행 모드", mode)
+                    
+                    # 채팅 히스토리에 추가
+                    st.session_state.chat_history.append({
+                        "timestamp": datetime.now(),
+                        "request": user_request,
+                        "response": result,
+                        "success": True
+                    })
+
+
                 
                 except Exception as e:
                     status.update(label="💥 시스템 오류", state="error", expanded=True)
