@@ -1,0 +1,94 @@
+# [Environment Variables] 환경변수 및 보안 정보
+.env
+.env.local
+.env.production
+.env.staging
+
+# [Python] Python 관련 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# [Virtual Environment] 가상환경
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# [IDE] IDE 관련 파일
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# [Logs] 로그 파일
+*.log
+logs/
+data/system.log
+data/audit_export_*.log
+
+# [Data] 데이터 파일 (민감 정보 포함 가능)
+data/vector_store/
+data/reports/*.md
+*.pkl
+*.pickle
+
+# [Cache] 캐시 파일
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# [Streamlit] Streamlit 관련
+.streamlit/secrets.toml
+
+# [Jupyter] Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# [OS] 운영체제 관련
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# [Temporary] 임시 파일
+*.tmp
+*.temp
+temp/
+tmp/
+
+# [Model Files] 대용량 모델 파일
+*.bin
+*.safetensors
+models/
+
+# [API Keys] API 키 백업 파일
+*_api_keys.txt
+credentials.json
+service_account.json

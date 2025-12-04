@@ -1,0 +1,28 @@
+# [Core Dependencies] 금융 AI 에이전트 시스템의 핵심 라이브러리
+streamlit>=1.28.0                # [Frontend] 사내 리서치 포털 UI 프레임워크
+smolagents>=0.3.0                # [AI Brain] CodeAgent를 통한 추론 및 코드 생성 엔진
+
+# [LLM & Embeddings] OpenAI API 연동
+openai>=1.3.0                    # [LLM] GPT 모델 API 클라이언트
+tiktoken>=0.5.0                  # [Tokenizer] OpenAI 토큰 계산 라이브러리
+
+# [Knowledge Management] RAG 시스템 구축
+langchain>=0.1.0                 # [RAG Framework] 문서 처리 및 체인 구성
+langchain-openai>=0.0.5          # [Embeddings] OpenAI 임베딩 모델 연동
+langchain-community>=0.0.10      # [Vector Store] FAISS 벡터 저장소 연동
+faiss-cpu>=1.7.4                 # [Vector Search] 고속 유사도 검색 엔진
+datasets>=2.14.0                 # [Data Source] HuggingFace 데이터셋 로더
+
+# [Financial Data] 주식 및 금융 데이터 수집
+yfinance>=0.2.18                 # [Stock Data] Yahoo Finance API 클라이언트
+requests>=2.31.0                 # [Web API] HTTP 요청 처리
+
+# [Security & Logging] 엔터프라이즈 보안 및 감사
+python-dotenv>=1.0.0             # [Security] 환경변수 관리 (.env 파일 로드)
+
+# [Data Processing] 데이터 처리 및 분석
+pandas>=2.0.0                    # [Data Analysis] 데이터프레임 처리
+numpy>=1.24.0                    # [Numerical] 수치 연산 라이브러리
+
+# [Text Processing] 자연어 처리 및 검색
+beautifulsoup4>=4.12.0           # [Web Scraping] HTML 파싱 (웹 검색 결과 처리)
