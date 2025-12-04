@@ -78,17 +78,20 @@ QuantX_Project/
 
 ### 1. 환경 설정
 ```bash
+# 프로젝트 클론
+git clone https://github.com/h-albert-lee/fastcampus-domain-multiagent.git
+cd fastcampus-domain-multiagent/QuantX_Project
+
 # 패키지 설치
 pip install -r requirements.txt
 
-# 환경 변수 설정
-cp .env.example .env
-# .env 파일에 API 키 입력
+# 환경 변수 설정 (선택사항)
+# .env 파일 생성 후 API 키 입력
 ```
 
-### 2. 필수 API 키 설정
+### 2. 필수 API 키 설정 (선택사항)
 ```bash
-# .env 파일 내용
+# .env 파일 내용 (실제 AI 기능 사용 시)
 OPENAI_API_KEY=your_openai_api_key_here
 HUGGINGFACE_API_TOKEN=your_huggingface_token_here  # 선택사항
 SERPER_API_KEY=your_serper_api_key_here           # 웹 검색용
@@ -96,6 +99,8 @@ SERPER_API_KEY=your_serper_api_key_here           # 웹 검색용
 
 ### 3. 애플리케이션 실행
 ```bash
+# QuantX_Project 폴더에서 실행
+cd QuantX_Project
 streamlit run app.py
 ```
 
