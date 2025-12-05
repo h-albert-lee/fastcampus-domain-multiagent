@@ -190,7 +190,7 @@ def get_stock_price(symbol: str) -> str:
         symbol (str): 주식 심볼 (예: '005930.KS', 'AAPL')
         
     Returns:
-        str: 주가 정보 (현재가, 변동률, 거래량 등)
+        str: 주가 정보 (현재가, 변동률, 거래량 등) + UI용 차트 데이터
     """
     try:
         logger.info(f"[Stock Price] 주가 조회 시작 - 심볼: {symbol}")
@@ -210,6 +210,28 @@ def get_stock_price(symbol: str) -> str:
         change_percent = (change / prev_close) * 100 if prev_close != 0 else 0
         volume = hist['Volume'].iloc[-1]
         
+        # [차트용 데이터 수집] UI에서 활용할 수 있도록 더 많은 기간의 데이터 수집
+        hist_30d = stock.history(period="30d")
+        
+        # [UI용 차트 데이터 저장] 세션 상태에 저장하여 UI에서 활용
+        from agents.core import AGENT_SESSION_STATE
+        chart_data = {
+            "symbol": symbol,
+            "dates": hist_30d.index.strftime('%Y-%m-%d').tolist(),
+            "prices": hist_30d['Close'].tolist(),
+            "volumes": hist_30d['Volume'].tolist(),
+            "highs": hist_30d['High'].tolist(),
+            "lows": hist_30d['Low'].tolist(),
+            "current_price": float(current_price),
+            "change": float(change),
+            "change_percent": float(change_percent),
+            "volume": int(volume),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # [중간 산출물 저장] UI에서 차트를 그릴 수 있도록 데이터 저장
+        AGENT_SESSION_STATE["intermediate_outputs"][f"stock_data_{symbol}"] = chart_data
+        
         # [결과 포맷팅] 금융 전문가 수준의 상세 정보 제공
         company_name = info.get('longName', symbol)
         market_cap = info.get('marketCap', 'N/A')
@@ -223,9 +245,16 @@ def get_stock_price(symbol: str) -> str:
             result += f"🏢 **시가총액**: {market_cap:,}원\n"
         
         result += f"🕐 **조회시간**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        
+        # [차트 데이터 정보 추가] UI에서 차트를 확인할 수 있음을 안내
+        result += f"📊 **차트 데이터**: 최근 30일 데이터가 시각화용으로 저장되었습니다.\n"
+        result += f"   - 데이터 포인트: {len(hist_30d)}개\n"
+        result += f"   - 최고가: {hist_30d['High'].max():,.0f}원\n"
+        result += f"   - 최저가: {hist_30d['Low'].min():,.0f}원\n\n"
+        
         result += "⚠️ **투자 유의사항**: 본 정보는 참고용이며, 투자 결정에 대한 책임은 투자자 본인에게 있습니다."
         
-        logger.info(f"[Stock Price] 주가 조회 완료 - {symbol}: {current_price:,.0f}원")
+        logger.info(f"[Stock Price] 주가 조회 완료 - {symbol}: {current_price:,.0f}원, 차트 데이터 {len(hist_30d)}개 저장")
         return result
         
     except Exception as e:
@@ -306,7 +335,7 @@ def get_market_summary() -> str:
     시장 전반의 흐름을 파악하는 데 유용합니다.
     
     Returns:
-        str: 시장 현황 요약 정보
+        str: 시장 현황 요약 정보 + UI용 차트 데이터
     """
     try:
         logger.info("[Market Summary] 시장 현황 요약 시작")
@@ -321,12 +350,14 @@ def get_market_summary() -> str:
         }
         
         summary = "📊 **주요 지수 현황**\n\n"
+        market_data = {}  # UI용 시장 데이터 저장
         
         for name, symbol in indices.items():
             try:
                 # [지수 데이터 조회] 각 지수별 최신 정보 수집
                 ticker = yf.Ticker(symbol)
                 hist = ticker.history(period="2d")  # 2일치 데이터로 전일 대비 계산
+                hist_7d = ticker.history(period="7d")  # 7일치 데이터로 차트용 데이터 수집
                 
                 if len(hist) >= 2:
                     current = hist['Close'].iloc[-1]
@@ -338,6 +369,18 @@ def get_market_summary() -> str:
                     emoji = "🔴" if change < 0 else "🟢" if change > 0 else "⚪"
                     
                     summary += f"{emoji} **{name}**: {current:,.2f} ({change:+.2f}, {change_percent:+.2f}%)\n"
+                    
+                    # [UI용 데이터 저장] 차트 생성을 위한 데이터 수집
+                    if len(hist_7d) > 0:
+                        market_data[name] = {
+                            "symbol": symbol,
+                            "current": float(current),
+                            "change": float(change),
+                            "change_percent": float(change_percent),
+                            "dates": hist_7d.index.strftime('%Y-%m-%d').tolist(),
+                            "values": hist_7d['Close'].tolist(),
+                            "volumes": hist_7d['Volume'].tolist() if 'Volume' in hist_7d.columns else []
+                        }
                 else:
                     summary += f"⚪ **{name}**: 데이터 없음\n"
                     
@@ -345,12 +388,32 @@ def get_market_summary() -> str:
                 logger.warning(f"[Market Summary] {name} 조회 실패: {str(e)}")
                 summary += f"⚪ **{name}**: 조회 실패\n"
         
+        # [UI용 시장 데이터 저장] 세션 상태에 저장하여 UI에서 활용
+        from agents.core import AGENT_SESSION_STATE
+        AGENT_SESSION_STATE["intermediate_outputs"]["market_summary"] = {
+            "indices": market_data,
+            "timestamp": datetime.now().isoformat(),
+            "total_indices": len(market_data)
+        }
+        
         # [시장 분석 코멘트] 전반적인 시장 상황 요약
         summary += f"\n🕐 **업데이트**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        
+        # [차트 데이터 정보 추가] UI에서 차트를 확인할 수 있음을 안내
+        summary += f"📊 **차트 데이터**: {len(market_data)}개 지수의 7일간 데이터가 시각화용으로 저장되었습니다.\n"
+        
+        # [시장 동향 분석] 상승/하락 지수 개수 계산
+        up_count = sum(1 for data in market_data.values() if data.get('change', 0) > 0)
+        down_count = sum(1 for data in market_data.values() if data.get('change', 0) < 0)
+        
+        summary += f"   - 상승 지수: {up_count}개\n"
+        summary += f"   - 하락 지수: {down_count}개\n"
+        summary += f"   - 데이터 포인트: 각 지수별 7일간 데이터\n\n"
+        
         summary += "📈 **시장 분석**: 위 지수들의 움직임을 종합하여 전반적인 시장 흐름을 파악하세요.\n\n"
         summary += "⚠️ **투자 유의사항**: 지수 정보는 참고용이며, 투자 결정에 대한 책임은 투자자 본인에게 있습니다."
         
-        logger.info("[Market Summary] 시장 현황 요약 완료")
+        logger.info(f"[Market Summary] 시장 현황 요약 완료 - {len(market_data)}개 지수 데이터 저장")
         return summary
         
     except Exception as e:

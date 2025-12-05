@@ -255,7 +255,7 @@ def render_sidebar():
 
 def render_main_interface():
     """
-    [Main Interface] 메인 인터페이스 렌더링
+    [Main Interface] 멀티 탭 메인 인터페이스 렌더링
     """
     user_info = auth_manager.get_user_info()
     
@@ -268,9 +268,11 @@ def render_main_interface():
         
         with col1:
             st.markdown("""
-            ### 🎯 Quant-X 시스템 특징
+            ### 🎯 Quant-X 멀티 에이전트 시스템 특징
             
-            - **🤖 AI 에이전트**: smolagents CodeAgent 기반 금융 분석
+            - **🤖 멀티 에이전트**: Manager-Worker 패턴 협업 구조
+            - **🔍 리서치 에이전트**: 정보 수집 전문가
+            - **📈 분석 에이전트**: 시장 데이터 분석가
             - **🧠 지식베이스**: HuggingFace 금융 데이터 RAG 검색
             - **🛡️ 보안 시스템**: 입출력 필터링 및 권한 관리
             - **📋 감사 로그**: 모든 활동 추적 및 기록
@@ -285,6 +287,8 @@ def render_main_interface():
             
             ### 🛠️ 주요 기능
             
+            - 멀티 에이전트 협업 리서치
+            - 실시간 협업 과정 시각화
             - 사내 지식베이스 검색
             - 웹 검색 및 주가 조회
             - 시장 요약 정보 제공
@@ -293,10 +297,31 @@ def render_main_interface():
         
         return
     
-    # 로그인한 경우 메인 인터페이스 표시
+    # 로그인한 경우 멀티 탭 인터페이스 표시
     st.markdown(f"### 👋 안녕하세요, {user_info['user_id']}님!")
+    st.markdown("**🏦 Quant-X 멀티 에이전트 금융 리서치 포털**")
     
-    # [Research Request] 리서치 요청 섹션
+    # [Multi-Tab Layout] 3개의 탭으로 분리
+    tab1, tab2, tab3 = st.tabs(["📋 종합 상황판", "🕵️ 리서치 센터", "📈 시장 분석실"])
+    
+    with tab1:
+        render_dashboard_tab(user_info)
+    
+    with tab2:
+        render_research_tab(user_info)
+    
+    with tab3:
+        render_analysis_tab(user_info)
+
+
+def render_dashboard_tab(user_info):
+    """
+    [종합 상황판] 매니저의 요약 브리핑 및 최종 보고서 탭
+    """
+    st.markdown("## 📋 종합 상황판 (Dashboard)")
+    st.markdown("매니저 에이전트의 종합 브리핑 및 최종 보고서를 확인할 수 있습니다.")
+    
+    # [리서치 요청 섹션]
     st.markdown("### 💼 금융 리서치 요청")
     
     # 예시 질문 버튼들
@@ -304,19 +329,19 @@ def render_main_interface():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if st.button("📊 삼성전자 주가 분석"):
+        if st.button("📊 삼성전자 주가 분석", key="dash_samsung"):
             st.session_state.example_query = "삼성전자의 최근 주가 동향과 실적을 분석해주세요."
     
     with col2:
-        if st.button("🏦 시장 현황 요약"):
+        if st.button("🏦 시장 현황 요약", key="dash_market"):
             st.session_state.example_query = "오늘의 주요 지수 현황과 시장 동향을 요약해주세요."
     
     with col3:
-        if st.button("🔍 사내 데이터 검색"):
+        if st.button("🔍 사내 데이터 검색", key="dash_internal"):
             st.session_state.example_query = "반도체 업종에 대한 사내 리포트를 검색해주세요."
     
     with col4:
-        if st.button("📈 투자 전망 분석"):
+        if st.button("📈 투자 전망 분석", key="dash_forecast"):
             st.session_state.example_query = "2024년 4분기 국내 주식시장 전망을 분석해주세요."
     
     # 리서치 요청 입력
@@ -325,103 +350,422 @@ def render_main_interface():
         "리서치 요청을 입력하세요:",
         value=default_query,
         height=100,
-        placeholder="예: 삼성전자의 최근 실적과 주가 전망을 분석해주세요."
+        placeholder="예: 삼성전자의 최근 실적과 주가 전망을 분석해주세요.",
+        key="dashboard_request"
     )
     
     # 요청 처리 버튼
-    col1, col2 = st.columns([1, 4])
+    col1, col2, col3 = st.columns([1, 1, 3])
     
     with col1:
         process_button = st.button("🚀 리서치 시작", type="primary", disabled=st.session_state.get('processing', False))
     
     with col2:
+        if st.session_state.get('last_result'):
+            if st.button("🔄 재분석 요청", help="이전 결과를 바탕으로 재분석을 요청합니다"):
+                st.session_state.reanalysis_requested = True
+    
+    with col3:
         if st.session_state.get('processing', False):
-            st.info("🔄 처리 중입니다. 잠시만 기다려주세요...")
+            st.info("🔄 멀티 에이전트가 협업 중입니다...")
+    
+    # [멀티 에이전트 협업 과정 시각화]
+    if st.session_state.get('processing', False) or st.session_state.get('last_collaboration_log'):
+        render_collaboration_status()
     
     # 요청 처리
     if process_button and user_request.strip():
-        st.session_state.processing = True
-        st.session_state.last_request = user_request
-        
-        # 진행 상태 표시
-        progress_container = st.container()
-        
-        with progress_container:
-            st.markdown("### 🔄 처리 진행 상황")
-            
-            # 진행 단계 표시
-            with st.status("리서치 요청 처리 중...", expanded=True) as status:
-                st.write("1️⃣ 보안 점검 중...")
-                time.sleep(1)
-                
-                st.write("2️⃣ AI 에이전트 실행 중...")
-                time.sleep(1)
-                
-                st.write("3️⃣ 사내 데이터 검색 중...")
-                time.sleep(1)
-                
-                st.write("4️⃣ 외부 정보 수집 중...")
-                time.sleep(1)
-                
-                st.write("5️⃣ 보고서 작성 중...")
-                time.sleep(1)
-                
-                st.write("6️⃣ 출력 검증 중...")
-                
-                # 실제 에이전트 실행
-                try:
-                    # 사용자별 에이전트 생성
-                    user_agent = create_agent(user_info["user_id"])
-                    result = user_agent.process_request(user_request)
-                    
-                    status.update(label="✅ 리서치 완료!", state="complete", expanded=False)
-                    
-                    # 결과 표시
-                    st.markdown("### 📋 리서치 결과")
-                    st.markdown(result)
-                    
-                    # 처리 정보 표시
-                    with st.expander("📊 처리 정보"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("처리 시간", f"{datetime.now().strftime('%H:%M:%S')}")
-                        with col2:
-                            mode = "데모 모드" if user_agent.is_demo_mode else "AI 모드"
-                            st.metric("실행 모드", mode)
-                    
-                    # 채팅 히스토리에 추가
-                    st.session_state.chat_history.append({
-                        "timestamp": datetime.now(),
-                        "request": user_request,
-                        "response": result,
-                        "success": True
-                    })
-
-
-                
-                except Exception as e:
-                    status.update(label="💥 시스템 오류", state="error", expanded=True)
-                    st.error(f"시스템 오류가 발생했습니다: {str(e)}")
-        
-        st.session_state.processing = False
-        
-        # 예시 쿼리 초기화
-        if hasattr(st.session_state, 'example_query'):
-            del st.session_state.example_query
+        process_multi_agent_request(user_request, user_info)
     
-    # [Chat History] 채팅 히스토리
-    if st.session_state.chat_history:
-        st.markdown("### 📚 리서치 히스토리")
+    # [HITL 인터페이스] Human-in-the-Loop 버튼
+    if st.session_state.get('last_result') and not st.session_state.get('processing', False):
+        render_hitl_interface()
+    
+    # [최종 보고서 표시]
+    if st.session_state.get('last_result'):
+        st.markdown("### 📋 최종 리서치 보고서")
+        st.markdown(st.session_state.last_result)
         
-        for i, chat in enumerate(reversed(st.session_state.chat_history[-5:])):  # 최근 5개만 표시
-            with st.expander(f"🕐 {chat['timestamp'].strftime('%H:%M:%S')} - {chat['request'][:50]}..."):
-                st.markdown(f"**요청**: {chat['request']}")
+        # 처리 정보 표시
+        with st.expander("📊 처리 정보"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("처리 시간", st.session_state.get('last_process_time', 'N/A'))
+            with col2:
+                mode = "데모 모드" if st.session_state.get('is_demo_mode', True) else "AI 모드"
+                st.metric("실행 모드", mode)
+            with col3:
+                agent_count = len(st.session_state.get('last_collaboration_log', []))
+                st.metric("협업 단계", f"{agent_count}단계")
+
+
+def render_research_tab(user_info):
+    """
+    [리서치 센터] 리서처 에이전트가 수집한 정보 표시 탭
+    """
+    st.markdown("## 🕵️ 리서치 센터 (Research Center)")
+    st.markdown("리서치 에이전트가 수집한 뉴스, 공시 자료 및 사내 데이터를 확인할 수 있습니다.")
+    
+    # [멀티 에이전트 세션 상태 가져오기]
+    from agents.core import get_session_state
+    agent_state = get_session_state()
+    
+    # [리서치 결과 표시]
+    research_results = agent_state.get("research_results", [])
+    
+    if research_results:
+        st.markdown(f"### 📚 수집된 정보 ({len(research_results)}건)")
+        
+        for i, result in enumerate(reversed(research_results[-5:]), 1):  # 최근 5개만 표시
+            with st.expander(f"🔍 리서치 #{i} - {result.get('timestamp', '')[:19]}"):
+                st.markdown(f"**질의**: {result.get('query', 'N/A')}")
+                st.markdown("**수집된 정보**:")
+                st.markdown(result.get('findings', 'N/A'))
                 
-                if chat['success']:
-                    st.markdown("**응답**:")
-                    st.markdown(chat['response'])
-                else:
-                    st.error(f"**오류**: {chat.get('error', '알 수 없는 오류')}")
+                # 메타데이터 표시
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("에이전트", result.get('agent', 'N/A'))
+                with col2:
+                    st.metric("정보량", f"{len(result.get('findings', ''))}자")
+    else:
+        st.info("🔍 아직 수집된 리서치 정보가 없습니다. 종합 상황판에서 리서치를 요청해보세요.")
+    
+    # [사내 데이터 검색 인터페이스]
+    st.markdown("### 🏢 사내 데이터 직접 검색")
+    
+    search_query = st.text_input("사내 지식베이스 검색:", placeholder="예: 반도체 업종 분석")
+    
+    if st.button("🔍 사내 검색 실행"):
+        if search_query:
+            with st.spinner("사내 데이터베이스 검색 중..."):
+                # 직접 사내 검색 실행
+                from agents.tools import search_internal
+                search_result = search_internal(search_query)
+                
+                st.markdown("### 🏢 사내 검색 결과")
+                st.markdown(search_result)
+        else:
+            st.warning("검색어를 입력해주세요.")
+    
+    # [웹 검색 인터페이스]
+    st.markdown("### 🌐 외부 정보 검색")
+    
+    web_query = st.text_input("웹 검색:", placeholder="예: 삼성전자 최신 뉴스")
+    
+    if st.button("🌐 웹 검색 실행"):
+        if web_query:
+            with st.spinner("웹 검색 중..."):
+                # 직접 웹 검색 실행
+                from agents.tools import search_web
+                web_result = search_web(web_query)
+                
+                st.markdown("### 🌐 웹 검색 결과")
+                st.markdown(web_result)
+        else:
+            st.warning("검색어를 입력해주세요.")
+
+
+def render_analysis_tab(user_info):
+    """
+    [시장 분석실] 애널리스트가 분석한 주가 차트 및 재무 지표 표시 탭
+    """
+    st.markdown("## 📈 시장 분석실 (Market Analysis Lab)")
+    st.markdown("시장 분석 에이전트가 분석한 주가 차트와 재무 지표를 확인할 수 있습니다.")
+    
+    # [멀티 에이전트 세션 상태 가져오기]
+    from agents.core import get_session_state
+    agent_state = get_session_state()
+    
+    # [분석 결과 표시]
+    analysis_results = agent_state.get("analysis_results", [])
+    intermediate_outputs = agent_state.get("intermediate_outputs", {})
+    
+    if analysis_results:
+        st.markdown(f"### 📊 분석 보고서 ({len(analysis_results)}건)")
+        
+        for i, result in enumerate(reversed(analysis_results[-3:]), 1):  # 최근 3개만 표시
+            with st.expander(f"📈 분석 #{i} - {result.get('timestamp', '')[:19]}"):
+                st.markdown(f"**분석 대상**: {result.get('query', 'N/A')}")
+                st.markdown("**분석 결과**:")
+                st.markdown(result.get('analysis', 'N/A'))
+    
+    # [주가 차트 시각화]
+    st.markdown("### 📈 주가 차트 시각화")
+    
+    # 저장된 주가 데이터 찾기
+    stock_data_keys = [key for key in intermediate_outputs.keys() if key.startswith('stock_data_')]
+    
+    if stock_data_keys:
+        # 가장 최근 주가 데이터 선택
+        latest_stock_key = max(stock_data_keys, key=lambda x: intermediate_outputs[x].get('timestamp', ''))
+        stock_data = intermediate_outputs[latest_stock_key]
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # 주가 차트 그리기
+            if stock_data.get('dates') and stock_data.get('prices'):
+                import pandas as pd
+                
+                chart_df = pd.DataFrame({
+                    'Date': pd.to_datetime(stock_data['dates']),
+                    'Price': stock_data['prices']
+                })
+                
+                st.markdown(f"**{stock_data.get('symbol', 'N/A')} 주가 추이 (30일)**")
+                st.line_chart(chart_df.set_index('Date'))
+        
+        with col2:
+            # 주요 지표 표시
+            st.markdown("**주요 지표**")
+            st.metric("현재가", f"{stock_data.get('current_price', 0):,.0f}원")
+            st.metric("변동", f"{stock_data.get('change', 0):+,.0f}원", 
+                     f"{stock_data.get('change_percent', 0):+.2f}%")
+            st.metric("거래량", f"{stock_data.get('volume', 0):,}주")
+    
+    # [시장 지수 차트]
+    st.markdown("### 🏦 시장 지수 현황")
+    
+    market_summary = intermediate_outputs.get('market_summary')
+    if market_summary and market_summary.get('indices'):
+        indices_data = market_summary['indices']
+        
+        # 지수별 현재 상황 표시
+        cols = st.columns(len(indices_data))
+        
+        for i, (name, data) in enumerate(indices_data.items()):
+            with cols[i % len(cols)]:
+                change_color = "normal" if data.get('change', 0) >= 0 else "inverse"
+                st.metric(
+                    name,
+                    f"{data.get('current', 0):,.2f}",
+                    f"{data.get('change_percent', 0):+.2f}%",
+                    delta_color=change_color
+                )
+        
+        # 지수 차트 그리기 (선택된 지수)
+        selected_index = st.selectbox("차트로 볼 지수 선택:", list(indices_data.keys()))
+        
+        if selected_index and indices_data[selected_index].get('dates'):
+            import pandas as pd
+            
+            index_data = indices_data[selected_index]
+            chart_df = pd.DataFrame({
+                'Date': pd.to_datetime(index_data['dates']),
+                'Value': index_data['values']
+            })
+            
+            st.markdown(f"**{selected_index} 7일 추이**")
+            st.line_chart(chart_df.set_index('Date'))
+    
+    # [직접 주가 조회 인터페이스]
+    st.markdown("### 💰 실시간 주가 조회")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        stock_symbol = st.text_input("주식 심볼 입력:", placeholder="예: 005930.KS (삼성전자)")
+    
+    with col2:
+        if st.button("📊 주가 조회"):
+            if stock_symbol:
+                with st.spinner("주가 정보 조회 중..."):
+                    # 직접 주가 조회 실행
+                    from agents.tools import get_stock_price
+                    price_result = get_stock_price(stock_symbol)
+                    
+                    st.markdown("### 💰 주가 정보")
+                    st.markdown(price_result)
+            else:
+                st.warning("주식 심볼을 입력해주세요.")
+    
+    # [시장 현황 조회 인터페이스]
+    if st.button("🏦 시장 현황 업데이트"):
+        with st.spinner("시장 현황 조회 중..."):
+            # 직접 시장 현황 조회 실행
+            from agents.tools import get_market_summary
+            market_result = get_market_summary()
+            
+            st.markdown("### 🏦 시장 현황")
+            st.markdown(market_result)
+
+
+def render_collaboration_status():
+    """
+    [협업 상태 시각화] 멀티 에이전트 협업 과정 실시간 표시
+    """
+    st.markdown("### 🤝 멀티 에이전트 협업 상태")
+    
+    # [멀티 에이전트 세션 상태 가져오기]
+    from agents.core import get_session_state
+    agent_state = get_session_state()
+    collaboration_log = agent_state.get("collaboration_log", [])
+    
+    if collaboration_log:
+        # 최근 협업 로그 표시
+        recent_logs = collaboration_log[-10:]  # 최근 10개
+        
+        for log in recent_logs:
+            timestamp = log.get('timestamp', '')[:19].replace('T', ' ')
+            agent = log.get('agent', 'Unknown')
+            action = log.get('action', 'Unknown')
+            
+            # 에이전트별 아이콘 설정
+            if 'Research' in agent:
+                icon = "🔍"
+                color = "blue"
+            elif 'Analyst' in agent:
+                icon = "📈"
+                color = "green"
+            elif 'Manager' in agent:
+                icon = "👔"
+                color = "orange"
+            else:
+                icon = "🤖"
+                color = "gray"
+            
+            # 협업 로그 표시
+            st.markdown(f"""
+            <div style="padding: 0.5rem; margin: 0.2rem 0; border-left: 3px solid {color}; background-color: #f8f9fa;">
+                <small>{timestamp}</small><br>
+                <strong>{icon} {agent}</strong>: {action}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # 세션 상태에 저장 (다른 탭에서도 볼 수 있도록)
+        st.session_state.last_collaboration_log = collaboration_log
+
+
+def render_hitl_interface():
+    """
+    [HITL 인터페이스] Human-in-the-Loop 승인/재작성 요청 버튼
+    """
+    st.markdown("### 🤝 Human-in-the-Loop 인터페이스")
+    st.markdown("AI 에이전트가 작성한 보고서를 검토하고 승인하거나 재작성을 요청할 수 있습니다.")
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    with col1:
+        if st.button("✅ 승인", type="primary", help="현재 보고서를 승인하고 최종 확정합니다"):
+            st.session_state.report_approved = True
+            st.success("✅ 보고서가 승인되었습니다!")
+            
+            # 승인된 보고서 저장 (권한이 있는 경우)
+            user_info = auth_manager.get_user_info()
+            if user_info.get("role") == "SENIOR_MANAGER":
+                from agents.tools import save_report
+                save_result = save_report(
+                    title=f"승인된 리서치 보고서 - {datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    content=st.session_state.get('last_result', '')
+                )
+                st.info(save_result)
+    
+    with col2:
+        if st.button("🔄 재작성 요청", help="보고서의 재작성을 요청합니다"):
+            st.session_state.reanalysis_requested = True
+            st.warning("🔄 재작성이 요청되었습니다. 추가 지시사항을 입력해주세요.")
+    
+    with col3:
+        if st.session_state.get('reanalysis_requested'):
+            feedback = st.text_input("재작성 지시사항:", placeholder="예: 더 자세한 기술적 분석을 포함해주세요")
+            
+            if st.button("📝 재작성 실행") and feedback:
+                # 피드백을 포함한 재분석 요청
+                original_request = st.session_state.get('last_request', '')
+                new_request = f"{original_request}\n\n[재작성 지시사항]: {feedback}"
+                
+                user_info = auth_manager.get_user_info()
+                process_multi_agent_request(new_request, user_info, is_reanalysis=True)
+                
+                st.session_state.reanalysis_requested = False
+
+
+def process_multi_agent_request(user_request, user_info, is_reanalysis=False):
+    """
+    [멀티 에이전트 요청 처리] 멀티 에이전트 시스템을 통한 요청 처리
+    """
+    st.session_state.processing = True
+    st.session_state.last_request = user_request
+    
+    # 진행 상태 표시
+    progress_container = st.container()
+    
+    with progress_container:
+        action_type = "재분석" if is_reanalysis else "리서치"
+        st.markdown(f"### 🔄 멀티 에이전트 {action_type} 진행 상황")
+        
+        # 진행 단계 표시
+        with st.status(f"멀티 에이전트 {action_type} 처리 중...", expanded=True) as status:
+            st.write("1️⃣ 보안 점검 중...")
+            time.sleep(1)
+            
+            st.write("2️⃣ 매니저 에이전트 초기화 중...")
+            time.sleep(1)
+            
+            st.write("3️⃣ 리서치 에이전트 작업 시작...")
+            time.sleep(1)
+            
+            st.write("4️⃣ 시장 분석 에이전트 작업 시작...")
+            time.sleep(1)
+            
+            st.write("5️⃣ 매니저 에이전트 결과 취합 중...")
+            time.sleep(1)
+            
+            st.write("6️⃣ 최종 보고서 작성 중...")
+            
+            # 실제 멀티 에이전트 실행
+            try:
+                # 멀티 에이전트 시스템 생성
+                user_agent = create_agent(user_info["user_id"])
+                result = user_agent.process_request(user_request)
+                
+                status.update(label=f"✅ 멀티 에이전트 {action_type} 완료!", state="complete", expanded=False)
+                
+                # 결과 저장
+                st.session_state.last_result = result
+                st.session_state.last_process_time = datetime.now().strftime('%H:%M:%S')
+                st.session_state.is_demo_mode = user_agent.is_demo_mode
+                
+                # 협업 로그 저장
+                collaboration_log = user_agent.get_collaboration_log()
+                st.session_state.last_collaboration_log = collaboration_log
+                
+                # 채팅 히스토리에 추가
+                if not hasattr(st.session_state, 'chat_history'):
+                    st.session_state.chat_history = []
+                
+                st.session_state.chat_history.append({
+                    "timestamp": datetime.now(),
+                    "request": user_request,
+                    "response": result,
+                    "success": True,
+                    "is_reanalysis": is_reanalysis
+                })
+                
+                st.success(f"✅ 멀티 에이전트 {action_type}가 완료되었습니다!")
+                
+            except Exception as e:
+                status.update(label="💥 시스템 오류", state="error", expanded=True)
+                st.error(f"시스템 오류가 발생했습니다: {str(e)}")
+                
+                # 오류 로그 저장
+                if not hasattr(st.session_state, 'chat_history'):
+                    st.session_state.chat_history = []
+                
+                st.session_state.chat_history.append({
+                    "timestamp": datetime.now(),
+                    "request": user_request,
+                    "error": str(e),
+                    "success": False,
+                    "is_reanalysis": is_reanalysis
+                })
+    
+    st.session_state.processing = False
+    
+    # 예시 쿼리 초기화
+    if hasattr(st.session_state, 'example_query'):
+        del st.session_state.example_query
 
 def render_admin_dashboard():
     """
