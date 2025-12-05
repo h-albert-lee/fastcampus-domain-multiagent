@@ -15,7 +15,11 @@ from functools import wraps
 
 # [External APIs] 외부 서비스 연동
 import yfinance as yf
-from duckduckgo_search import DDGS  # [무료 검색] API 키 불필요한 웹 검색 서비스
+try:
+    from ddgs import DDGS
+except ImportError:
+    # 하위 호환성을 위한 fallback
+    from duckduckgo_search import DDGS  # [무료 검색] API 키 불필요한 웹 검색 서비스
 
 # [smolagents Integration] AI 에이전트 도구 데코레이터
 try:
@@ -281,8 +285,9 @@ def save_report(title: str, content: str) -> str:
     try:
         # [권한 체크] Senior Manager만 리포트 저장 가능
         # 이는 금융 기관의 정보 보안 정책을 반영한 것입니다
-        user_id = auth_manager.current_user_id
-        if not auth_manager.check_permission(user_id, 'save_report'):
+        user_info = auth_manager.get_user_info()
+        user_id = user_info.get("user_id", "unknown")
+        if not auth_manager.check_permission('save_report'):
             logger.warning(f"[Save Report] 권한 없음 - 사용자: {user_id}")
             return "❌ **권한 부족**\n\n리포트 저장 권한이 없습니다. Senior Manager만 저장 가능합니다."
         

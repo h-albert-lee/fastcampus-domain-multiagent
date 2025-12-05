@@ -26,7 +26,7 @@ numpy>=1.24.0                    # [Numerical] 수치 연산 라이브러리
 
 # [Text Processing] 자연어 처리 및 검색
 beautifulsoup4>=4.12.0           # [Web Scraping] HTML 파싱 (웹 검색 결과 처리)
-duckduckgo-search>=6.0.0         # [Web Search] 무료 웹 검색 API (API 키 불필요)
+ddgs>=6.0.0                      # [Web Search] 무료 웹 검색 API (API 키 불필요, duckduckgo-search 후속)
 
 # [LLM Integration] 다양한 LLM 모델 통합
 litellm>=1.50.0                  # [Model Gateway] OpenAI/Anthropic 등 통합 인터페이스
