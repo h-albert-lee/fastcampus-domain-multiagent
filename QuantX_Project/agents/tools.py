@@ -145,7 +145,7 @@ def search_web(query: str) -> str:
         # max_results=3으로 제한하여 응답 속도 최적화 및 과도한 정보 방지
         with DDGS() as ddgs:
             search_results = list(ddgs.text(
-                keywords=query,
+                query,  # 첫 번째 위치 인자로 query 전달
                 max_results=3,  # [성능 최적화] 상위 3개 결과만 가져와 응답 속도 향상
                 region='kr-ko',  # [지역화] 한국 관련 결과 우선 표시
                 safesearch='moderate'  # [안전 검색] 부적절한 콘텐츠 필터링

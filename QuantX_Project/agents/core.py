@@ -578,7 +578,7 @@ class ManagerAgent:
             
             # [2단계: 애널리스트에게 분석 요청]
             logger.info("[Manager Agent] 하위 에이전트 호출 - 애널리스트")
-            analysis_result = self.market_analyst.analyze(request)
+            analysis_result = self.analyst_agent.analyze(request)
             
             # [3단계: 매니저가 결과 취합 및 최종 보고서 작성]
             management_prompt = f"""
