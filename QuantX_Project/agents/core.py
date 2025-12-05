@@ -118,7 +118,6 @@ class ResearchAgent:
                 tools=research_tools,
                 model=model,
                 add_base_tools=True,
-                max_iterations=8,
                 verbosity_level=1
             )
             
@@ -318,7 +317,6 @@ class MarketAnalystAgent:
                 tools=analyst_tools,
                 model=model,
                 add_base_tools=True,
-                max_iterations=8,
                 verbosity_level=1
             )
             
@@ -519,39 +517,15 @@ class ManagerAgent:
             model = LiteLLMModel(model_id="gpt-4o")
             logger.info("[Manager Agent] LiteLLMModel 초기화 완료")
             
-            # [하위 에이전트를 도구로 변환]
-            # smolagents.Tool.from_agent를 사용하여 에이전트를 도구로 변환
-            manager_tools = []
-            
-            # ResearchAgent를 ask_researcher 도구로 변환
-            if not self.research_agent.is_demo_mode:
-                research_tool = Tool.from_agent(
-                    agent=self.research_agent.agent,
-                    name="ask_researcher",
-                    description="정보 수집 전문가에게 리서치를 요청합니다. 사내 데이터와 웹 검색을 통해 관련 정보를 수집합니다."
-                )
-                manager_tools.append(research_tool)
-                logger.info("[Manager Agent] ResearchAgent를 ask_researcher 도구로 변환 완료")
-            
-            # MarketAnalystAgent를 ask_analyst 도구로 변환
-            if not self.analyst_agent.is_demo_mode:
-                analyst_tool = Tool.from_agent(
-                    agent=self.analyst_agent.agent,
-                    name="ask_analyst",
-                    description="시장 분석 전문가에게 분석을 요청합니다. 주가 데이터와 시장 현황을 분석합니다."
-                )
-                manager_tools.append(analyst_tool)
-                logger.info("[Manager Agent] MarketAnalystAgent를 ask_analyst 도구로 변환 완료")
-            
-            # 리포트 저장 도구 추가
-            manager_tools.append(save_report)
+            # [매니저 전용 도구 설정]
+            # 매니저는 리포트 저장과 기본 도구들을 사용
+            manager_tools = [save_report]
             
             # [CodeAgent 생성] 매니저 전문 에이전트
             self.agent = CodeAgent(
                 tools=manager_tools,
                 model=model,
                 add_base_tools=True,
-                max_iterations=12,  # 하위 에이전트 호출을 고려하여 더 많은 반복 허용
                 verbosity_level=1
             )
             
@@ -598,24 +572,28 @@ class ManagerAgent:
         AI 매니저 에이전트를 통한 실제 업무 분담 및 조율 수행
         """
         try:
-            # [매니저 전문 프롬프트]
+            # [1단계: 리서처에게 정보 수집 요청]
+            logger.info("[Manager Agent] 하위 에이전트 호출 - 리서처")
+            research_result = self.research_agent.research(request)
+            
+            # [2단계: 애널리스트에게 분석 요청]
+            logger.info("[Manager Agent] 하위 에이전트 호출 - 애널리스트")
+            analysis_result = self.market_analyst.analyze(request)
+            
+            # [3단계: 매니저가 결과 취합 및 최종 보고서 작성]
             management_prompt = f"""
-당신은 금융 리서치 팀장입니다. 다음 원칙을 반드시 준수하세요:
+당신은 금융 리서치 팀장입니다. 팀원들의 작업 결과를 바탕으로 최종 보고서를 작성하세요.
 
-1. **업무 분담**: 요청을 분석하여 리서처와 애널리스트에게 적절히 업무를 분담하세요.
-2. **순차적 실행**: 먼저 리서처에게 정보 수집을, 그 다음 애널리스트에게 분석을 맡기세요.
-3. **결과 취합**: 각 팀원의 결과를 종합하여 완성도 높은 최종 보고서를 작성하세요.
-4. **품질 관리**: 정보의 정확성과 분석의 객관성을 검증하세요.
-5. **보고서 저장**: 완성된 보고서는 save_report 도구를 사용하여 저장하세요.
+**리서처 보고서:**
+{research_result}
 
-현재 사용 가능한 도구:
-- ask_researcher: 리서처에게 정보 수집 요청
-- ask_analyst: 애널리스트에게 시장 분석 요청  
-- save_report: 최종 보고서 저장
+**애널리스트 보고서:**
+{analysis_result}
 
-사용자 요청: {request}
+**사용자 요청:** {request}
 
-위 요청을 분석하여 팀원들에게 적절히 업무를 분담하고, 결과를 취합하여 종합적인 보고서를 작성해주세요.
+위 정보들을 종합하여 완성도 높은 최종 보고서를 작성해주세요. 
+정보의 정확성을 검증하고, 객관적인 분석을 제공하며, 실행 가능한 인사이트를 포함하세요.
 """
             
             # [에이전트 실행]
